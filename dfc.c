@@ -67,7 +67,6 @@ void put(char *filename) {
     int ret = 0;
     msg_t pkt;
     int len = 0;
-    int left = 0;
     char *rbuf;
     
     /* Open file */
@@ -80,12 +79,8 @@ void put(char *filename) {
     
     /* Get file len/4 */
     fseek(f, 0L, SEEK_END);
-    len = ftell(f) / 4;
-    // TODO leftover / 4
+    len = (ftell(f) + (4 - 1)) / 4;
     fseek(f, 0L, SEEK_SET);
-    if (len % 4 == 0) {
-        left = len;
-    }
 
     /* Compute MD5 hash */
     MD5_Init(&m);
@@ -114,10 +109,14 @@ void put(char *filename) {
         
         printf("Sending to server %d", md5_mod);
 
+        /* Read chunk */
+        fseek(f, len * i, SEEK_SET);
+        num = fread(rbuf, 1, len, f);
+
         /* Build first packet */
         pkt.func  = GET;
         pkt.chunk = i;
-        pkt.dlen = len;
+        pkt.dlen = num;
         strcpy(pkt.username, username);
         strcpy(pkt.password, password);
         strcpy(pkt.filename, filename);
@@ -130,12 +129,15 @@ void put(char *filename) {
         }
 
         /* Send first data chunk */
-        fseek(f, len * i, SEEK_SET);
-        num = fread(rbuf, 1, len, f);
         ret = send(dfs_sock[md5_mod], rbuf, len, 0);
+
+        /* Read chunk */
+        fseek(f, len * ((i + 1) % 4), SEEK_SET);
+        num = fread(rbuf, 1, len, f);
 
         /* Build second packet */
         pkt.chunk = (i + 1) % 4;
+        pkt.dlen  = num;
  
         /* Send packet */
         ret = send(dfs_sock[md5_mod], &pkt, sizeof(pkt), 0);
@@ -144,14 +146,13 @@ void put(char *filename) {
         }
 
         /* Send second data chunk */
-        fseek(f, len * ((i + 1) % 4), SEEK_SET);
-        num = fread(rbuf, 1, len, f);
         ret = send(dfs_sock[md5_mod], rbuf, len, 0);
 
         /* Go to next server index */
         md5_mod = (md5_mod + 1) % 4;
     }
 
+    /* TODO Get response from servers */
 }
 
 void mkdir(char *dirname) {
