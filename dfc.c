@@ -20,6 +20,26 @@
 #include <arpa/inet.h>
 #include <openssl/md5.h>
 
+#define LIST  0
+#define GET   1
+#define PUT   2
+#define MKDIR 3
+
+int dfs_sock[4];
+struct sockaddr_in dfs_addr[4];
+char username[64];
+char password[64];
+
+typedef struct msg_s {
+    uint32_t func;
+    uint32_t chunk;
+    uint32_t dlen;
+    char username[64];
+    char password[64];
+    char filename[64];
+    char directory[64];
+} msg_t;
+
 void error(char *msg) {
     perror(msg);
     exit(1);
@@ -41,8 +61,14 @@ void put(char *filename) {
     FILE *f = fopen(filename, "r");
     MD5_CTX m;
     int num = 0;
-    char temp[1024];
-    char md5_buf[MD5_DIGEST_LENGTH];
+    char temp[512];
+    unsigned char md5_buf[MD5_DIGEST_LENGTH];
+    int md5_mod = 0;
+    int ret = 0;
+    msg_t pkt;
+    int len = 0;
+    int left = 0;
+    char *rbuf;
     
     /* Open file */
     if (f == NULL) {
@@ -50,19 +76,81 @@ void put(char *filename) {
         return;
     }
 
+    printf("Opened file\n");
+    
+    /* Get file len/4 */
+    fseek(f, 0L, SEEK_END);
+    len = ftell(f) / 4;
+    // TODO leftover / 4
+    fseek(f, 0L, SEEK_SET);
+    if (len % 4 == 0) {
+        left = len;
+    }
+
     /* Compute MD5 hash */
     MD5_Init(&m);
-    num = fread(temp, 1, 1024, f);
+    num = fread(temp, 1, 512, f);
     while (num > 0) {
         MD5_Update(&m, temp, num);
-        num = fread(temp, 1, 1024, f);
+        num = fread(temp, 1, 512, f);
     }
     MD5_Final(md5_buf, &m);
 
+    printf("MD5 hash is ");
     for (int i = 0; i < MD5_DIGEST_LENGTH; i++) {
         printf("%02x", md5_buf[i]);
     }
     printf("\n");
+    
+    /* Get modulo */
+    md5_mod = md5_buf[MD5_DIGEST_LENGTH-1] % 4;
+    printf("Modulo is %d\n", md5_mod);
+
+    /* Create file buffer */
+    rbuf = (char *) malloc(len);
+
+    /* Start on index associated with modulo */
+    for (int i = 0; i < 4; i++) {
+        
+        printf("Sending to server %d", md5_mod);
+
+        /* Build first packet */
+        pkt.func  = GET;
+        pkt.chunk = i;
+        pkt.dlen = len;
+        strcpy(pkt.username, username);
+        strcpy(pkt.password, password);
+        strcpy(pkt.filename, filename);
+        strcpy(pkt.directory, "\\");
+
+        /* Send packet */
+        ret = send(dfs_sock[md5_mod], &pkt, sizeof(pkt), 0);
+        if (ret < 0) {
+            printf("Packet failed\n");
+        }
+
+        /* Send first data chunk */
+        fseek(f, len * i, SEEK_SET);
+        num = fread(rbuf, 1, len, f);
+        ret = send(dfs_sock[md5_mod], rbuf, len, 0);
+
+        /* Build second packet */
+        pkt.chunk = (i + 1) % 4;
+ 
+        /* Send packet */
+        ret = send(dfs_sock[md5_mod], &pkt, sizeof(pkt), 0);
+        if (ret < 0) {
+            printf("Packet failed\n");
+        }
+
+        /* Send second data chunk */
+        fseek(f, len * ((i + 1) % 4), SEEK_SET);
+        num = fread(rbuf, 1, len, f);
+        ret = send(dfs_sock[md5_mod], rbuf, len, 0);
+
+        /* Go to next server index */
+        md5_mod = (md5_mod + 1) % 4;
+    }
 
 }
 
@@ -75,16 +163,12 @@ int main(int argc, char *argv[]) {
     char dfs_host[4][32];
     char dfs_port[4][8];
 
-    char username[64];
-    char password[64];
     char *temp;
     char line[256];
     int dfs_index = 0;
-    char *user_input;
+    char user_input[64];
     char *user_oper; 
     char *user_arg;
-    int dfs_sock[4];  
-    struct sockaddr_in dfs_addr[4];
     int serv_len = 0;
     int ret = 0;
 
@@ -127,7 +211,7 @@ int main(int argc, char *argv[]) {
     }
 
     /* Create sockets */
-    for (int i = 0; i < 4; i++ ){
+    for (int i = 0; i < 1; i++ ){
         printf("Creating socket %d\n", i);
         dfs_sock[i] = socket(AF_INET, SOCK_STREAM, 0);
         if (dfs_sock < 0) {
@@ -135,7 +219,7 @@ int main(int argc, char *argv[]) {
         }
 
         /* Build server address */
-/*        bzero((char *) &dfs_addr[i], sizeof(dfs_addr[i]));
+        bzero((char *) &dfs_addr[i], sizeof(dfs_addr[i]));
         dfs_addr[i].sin_family = AF_INET;
         dfs_addr[i].sin_port = htons(atoi(dfs_port[i]));
         if (inet_pton(AF_INET, dfs_host[i], &dfs_addr[i].sin_addr) <= 0) {
@@ -151,7 +235,7 @@ int main(int argc, char *argv[]) {
         ret = send(dfs_sock[i], "hello world", 11, 0);
         if (ret < 0) {
             printf("Packet failed\n");
-        } */
+        }
     }
 
     /* Command loop */
@@ -160,7 +244,7 @@ int main(int argc, char *argv[]) {
 
         /* Prevent empty input */
         if (strcmp("\n", user_input) == 0) {
-            printf("Invalid option. Options are:\n\tlist\n\tget\n\tput\n");
+            printf("Invalid option. Options are:\n\tlist\n\tget\n\tput\n\tmkdir\n");
             continue;
         }
    
@@ -169,7 +253,7 @@ int main(int argc, char *argv[]) {
 
         /* Select operation */
         if (strcmp("list", user_oper) == 0) {
-            printf("Sending list command");
+            printf("Sending list command\n");
             list();
         } else if(strcmp ("get", user_oper) == 0) {
             user_arg = strtok(NULL, " \n\t\r");
@@ -177,7 +261,7 @@ int main(int argc, char *argv[]) {
                 printf("Needs an argument for file to get\n");
                 continue;
             }
-            printf("Sending get command");
+            printf("Sending get command\n");
             get(user_arg);
         } else if(strcmp ("put", user_oper) == 0) {
             user_arg = strtok(NULL, " \n\t\r");
@@ -185,7 +269,7 @@ int main(int argc, char *argv[]) {
                 printf("Needs an argument for file to put\n");
                 continue;
             }
-            printf("Sending put command");
+            printf("Sending put command\n");
             put(user_arg);
          } else if(strcmp ("mkdir", user_oper) == 0) {
             user_arg = strtok(NULL, " \n\t\r");
@@ -193,10 +277,10 @@ int main(int argc, char *argv[]) {
                 printf("Needs an argument for directory name\n");
                 continue;
             }
-            printf("Sending mkdir command");
+            printf("Sending mkdir command\n");
             mkdir(user_arg);
         } else {
-            printf("Invalid option. Options are:\n\tlist\n\tget\n\tput\n");
+            printf("Invalid option. Options are:\n\tlist\n\tget\n\tput\n\tmkdir\n");
             continue;
         }
     }
