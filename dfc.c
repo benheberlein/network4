@@ -74,7 +74,6 @@ void put(char *filename) {
         printf("Invalid file\n");
         return;
     }
-
     printf("Opened file\n");
     
     /* Get file len/4 */
@@ -107,7 +106,7 @@ void put(char *filename) {
     /* Start on index associated with modulo */
     for (int i = 0; i < 4; i++) {
         
-        printf("Sending to server %d", md5_mod);
+        printf("Sending to server %d\n", md5_mod);
 
         /* Read chunk */
         fseek(f, len * i, SEEK_SET);
@@ -120,7 +119,7 @@ void put(char *filename) {
         strcpy(pkt.username, username);
         strcpy(pkt.password, password);
         strcpy(pkt.filename, filename);
-        strcpy(pkt.directory, "\\");
+        strcpy(pkt.directory, "/");
 
         /* Send packet */
         ret = send(dfs_sock[md5_mod], &pkt, sizeof(pkt), 0);
@@ -153,6 +152,9 @@ void put(char *filename) {
     }
 
     /* TODO Get response from servers */
+
+    /* Free memory */
+    free(rbuf);
 }
 
 void mkdir(char *dirname) {
@@ -173,8 +175,13 @@ int main(int argc, char *argv[]) {
     int serv_len = 0;
     int ret = 0;
 
+    if (argc != 2) {
+        printf("Not enough arguments. please supply a file\n");
+        exit(1);
+    }
+
     /* Parse file for server names, user, and password */
-    FILE *config = fopen("dfc.conf", "r");
+    FILE *config = fopen(argv[1], "r");
     if (config == NULL) {
         error("Could not open config file");
     }
@@ -231,12 +238,12 @@ int main(int argc, char *argv[]) {
             error("Connection failed");
         }
 
-        printf("Sending to socket %d\n", i);
-        serv_len = sizeof(dfs_addr[i]);
-        ret = send(dfs_sock[i], "hello world", 11, 0);
-        if (ret < 0) {
-            printf("Packet failed\n");
-        }
+        //printf("Sending to socket %d\n", i);
+        //serv_len = sizeof(dfs_addr[i]);
+        //ret = send(dfs_sock[i], "hello world", 11, 0);
+        //if (ret < 0) {
+        //    printf("Packet failed\n");
+        //}
     }
 
     /* Command loop */

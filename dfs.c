@@ -18,8 +18,26 @@
 #include <signal.h>
 #include <netinet/in.h>
 #include <arpa/inet.h>
+#include <sys/stat.h>
 
 #define RECSIZE 1024
+
+// TODO read conf file for username and password
+char username[64] = "Alice";
+char password[64] = "SimplePassword";
+
+// TODO pass in server ID as arg
+char server_name[64] = "DFS1";
+
+typedef struct msg_s {
+    uint32_t func;
+    uint32_t chunk;
+    uint32_t dlen;
+    char username[64];
+    char password[64];
+    char filename[64];
+    char directory[64];
+} msg_t;
 
 void error(char *msg) {
     perror(msg);
@@ -31,18 +49,67 @@ void warn(char *msg) {
 }
 
 void process(int sock) {
-
-    char rec[RECSIZE];
+    msg_t rec;
     int num = 0;
+    char *rbuf;
+    char path[256] = "";
+    char ch[4] = "";
     
     /* Get request data */
-    num = read(sock, rec, RECSIZE-1);
+    num = read(sock, &rec, sizeof(rec));
 
-    if (num < 0) {
+    if (num != sizeof(rec)) {
         error("read");
     }
 
-    printf("Received the following\n%s\n",rec);
+    /* Check username and password */
+    if (strcmp(username, rec.username) != 0) {
+        printf("Bad username");
+    }
+    if (strcmp(password, rec.password) != 0) {
+        printf("Bad password");
+    }
+ 
+    /* Open buffer for chunk */
+    rbuf = (char *) malloc(rec.dlen + 32);
+
+    /* Construct path */
+    strcat(path, server_name);
+    strcat(path, "/");
+    mkdir(path, S_IRWXU | S_IRWXG | S_IROTH | S_IXOTH);
+    strcat(path, rec.username);
+    strcat(path, rec.directory);
+    printf("Creating dir at %s\n", path);
+    mkdir(path, S_IRWXU | S_IRWXG | S_IROTH | S_IXOTH);
+    strcat(path, ".");
+    strcat(path, rec.filename);
+    strcat(path, ".");
+    sprintf(ch, "%d", rec.chunk);
+    strcat(path, ch);
+
+    /* Open first file */
+    printf("Opening file %s\n", path);
+    FILE *f = fopen(path, "w");
+    if (f == NULL) {
+        printf("Could not open file\n");
+        return;
+    }
+    printf("Opened file\n");
+
+    /* Get read data and save */
+    num = read(sock, rbuf, rec.dlen);
+    printf("Data size: %d %d\n", num, rec.dlen);
+    if (num != rec.dlen) {
+        printf("Could not read file data\n");
+    }
+    fwrite(rbuf, 1, num, f); 
+    printf("Wrote file\n");
+
+    /* Close file */
+    fclose(f);
+   
+    /* Free memory */
+    free(rbuf);
 }
 
 int main(int argc, char *argv[]) {
@@ -50,11 +117,12 @@ int main(int argc, char *argv[]) {
     uint16_t port = 10100;
 
     /* Get port number */
-    if (argc != 2) {
-        printf("Please pass in a port number\n");
+    if (argc != 3) {
+        printf("Please pass in a server name and a port number\n");
         exit(1);
     }
-    port = atoi(argv[1]);
+    port = atoi(argv[2]);
+    strcpy(server_name, argv[1]);
 
     /* Start server */
     printf("Starting server with port %d\n", port);
@@ -82,6 +150,14 @@ int main(int argc, char *argv[]) {
     opt = 1;
     setsockopt(sock, SOL_SOCKET, SO_REUSEADDR, (const void *) &opt, sizeof(int));
 
+    /* Set socket recieve timeout (200ms) */
+/*    struct timeval tv;
+    tv.tv_sec = 0;
+    tv.tv_usec = 50000;
+    if (setsockopt(sock, SOL_SOCKET, SO_RCVTIMEO, &tv, sizeof(tv)) < 0) {
+        error("Error setting socket timeout");
+    } */
+
     /* Set socket address, port, etc */
     serverAddr.sin_family = AF_INET;
     serverAddr.sin_port = htons(port);
@@ -107,8 +183,9 @@ int main(int argc, char *argv[]) {
 
         /* Make sure accept worked */
         if (tempSock < 0) {
-            perror("accept");
-            exit(-1);
+            //perror("accept");
+            //exit(-1);
+            continue;
         }
 
         /* Create new thread to handle connection */
