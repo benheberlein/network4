@@ -113,7 +113,7 @@ void put(char *filename) {
         num = fread(rbuf, 1, len, f);
 
         /* Build first packet */
-        pkt.func  = GET;
+        pkt.func  = PUT;
         pkt.chunk = i;
         pkt.dlen = num;
         strcpy(pkt.username, username);
@@ -157,7 +157,7 @@ void put(char *filename) {
     free(rbuf);
 }
 
-void mkdir(char *dirname) {
+void makedir(char *dirname) {
 
 }
 
@@ -286,7 +286,7 @@ int main(int argc, char *argv[]) {
                 continue;
             }
             printf("Sending mkdir command\n");
-            mkdir(user_arg);
+            makedir(user_arg);
         } else {
             printf("Invalid option. Options are:\n\tlist\n\tget\n\tput\n\tmkdir\n");
             continue;

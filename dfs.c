@@ -20,13 +20,11 @@
 #include <arpa/inet.h>
 #include <sys/stat.h>
 
-#define RECSIZE 1024
+#define LIST  0
+#define GET   1
+#define PUT   2
+#define MKDIR 3
 
-// TODO read conf file for username and password
-char username[64] = "Alice";
-char password[64] = "SimplePassword";
-
-// TODO pass in server ID as arg
 char server_name[64] = "DFS1";
 
 typedef struct msg_s {
@@ -48,34 +46,48 @@ void warn(char *msg) {
     perror(msg);
 }
 
-void process(int sock) {
-    msg_t rec;
+void get(msg_t rec) {
+
+}
+
+void put(msg_t rec, int sock) {
     int num = 0;
     char *rbuf;
     char path[256] = "";
     char ch[4] = "";
-    
-    /* Get request data */
-    num = read(sock, &rec, sizeof(rec));
-
-    if (num != sizeof(rec)) {
-        error("read");
-    }
+    char *temp;
+    char line[265];
+    int user_flag = 0;
+    FILE *f;
+    FILE *config;
 
     /* Check username and password */
-    if (strcmp(username, rec.username) != 0) {
-        printf("Bad username");
+    config = fopen("dfs.conf", "r");
+    user_flag = 0;
+    while(fgets(line, sizeof(line), config)) {
+        temp = strtok(line, " \r\n");
+        if (strcmp(temp, rec.username) == 0) {
+            printf("Found matching username\n");
+            temp = strtok(NULL, " \r\n");
+            if (strcmp(temp, rec.password) == 0) {
+                printf("Found matching password\n");
+                user_flag = 1;
+                break;
+            }
+        }
     }
-    if (strcmp(password, rec.password) != 0) {
-        printf("Bad password");
+    fclose(config);
+    if (user_flag == 0) {
+        // TODO send message back to client
+        printf("Username and password not matched\n");
+        return;
     }
- 
+
     /* Open buffer for chunk */
     rbuf = (char *) malloc(rec.dlen + 32);
 
     /* Construct path */
-    strcat(path, server_name);
-    strcat(path, "/");
+    strcpy(path, server_name);
     mkdir(path, S_IRWXU | S_IRWXG | S_IROTH | S_IXOTH);
     strcat(path, rec.username);
     strcat(path, rec.directory);
@@ -89,7 +101,7 @@ void process(int sock) {
 
     /* Open first file */
     printf("Opening file %s\n", path);
-    FILE *f = fopen(path, "w");
+    f = fopen(path, "w");
     if (f == NULL) {
         printf("Could not open file\n");
         return;
@@ -107,9 +119,114 @@ void process(int sock) {
 
     /* Close file */
     fclose(f);
+
+    /* Get request data for second packet */
+    num = read(sock, &rec, sizeof(rec));
+    if (num != sizeof(rec)) {
+        error("read");
+    }
+
+    /* Check username and password */
+    config = fopen("dfs.conf", "r");
+    user_flag = 0;
+    while(fgets(line, sizeof(line), config)) {
+        temp = strtok(line, " \r\n");
+        if (strcmp(temp, rec.username) == 0) {
+            printf("Found matching username\n");
+            temp = strtok(NULL, " \r\n");
+            if (strcmp(temp, rec.password) == 0) {
+                printf("Found matching password\n");
+                user_flag = 1;
+                break;
+            }
+        }
+    }
+    fclose(config);
+    if (user_flag == 0) {
+        // TODO send message back to client
+        printf("Username and password not matched\n");
+        return;
+    }
+
+    /* Construct path */
+    strcpy(path, server_name);
+    mkdir(path, S_IRWXU | S_IRWXG | S_IROTH | S_IXOTH);
+    strcat(path, rec.username);
+    strcat(path, rec.directory);
+    printf("Creating dir at %s\n", path);
+    mkdir(path, S_IRWXU | S_IRWXG | S_IROTH | S_IXOTH);
+    strcat(path, ".");
+    strcat(path, rec.filename);
+    strcat(path, ".");
+    sprintf(ch, "%d", rec.chunk);
+    strcat(path, ch);
+
+    /* Open second file */
+    printf("Opening file %s\n", path);
+    f = fopen(path, "w");
+    if (f == NULL) {
+        printf("Could not open file\n");
+        return;
+    }
+    printf("Opened file\n");
+
+    /* Get read data and save */
+    num = read(sock, rbuf, rec.dlen);
+    printf("Data size: %d %d\n", num, rec.dlen);
+    if (num != rec.dlen) {
+        printf("Could not read file data\n");
+    }
+    fwrite(rbuf, 1, num, f);
+    printf("Wrote file\n");
+
+    /* Close file */
+    fclose(f);
    
     /* Free memory */
     free(rbuf);
+}
+
+void list(msg_t rec) {
+
+}
+
+void makedir(msg_t rec) {
+
+}
+
+void process(int sock) {
+    msg_t rec;
+    int num = 0;
+    char *rbuf;
+    char path[256] = "";
+    char ch[4] = "";
+    char *temp;
+    char line[265];    
+    int user_flag = 0;
+    FILE *f;
+    FILE *config;
+
+    /* Get request data */
+    num = read(sock, &rec, sizeof(rec));
+    if (num != sizeof(rec)) {
+        error("read");
+    }
+
+    /* Put request */
+    if (rec.func == PUT) {
+        put(rec, sock);
+    } else if (rec.func == GET) {
+        get(rec);
+    } else if (rec.func == LIST) {
+        list(rec);
+    } else if (rec.func == MKDIR) {
+        makedir(rec);
+    } else {
+        printf("Received invalid function\n");
+        return;
+    }
+
+
 }
 
 int main(int argc, char *argv[]) {
@@ -123,7 +240,10 @@ int main(int argc, char *argv[]) {
     }
     port = atoi(argv[2]);
     strcpy(server_name, argv[1]);
-
+    if (strstr(server_name, "/") == NULL) {
+        strcat(server_name, "/");
+    }
+    
     /* Start server */
     printf("Starting server with port %d\n", port);
     struct sockaddr_in serverAddr;
