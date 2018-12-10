@@ -25,6 +25,9 @@
 #define PUT   2
 #define MKDIR 3
 
+#define SUCCESS     0
+#define CREDENTIALS 255
+
 char server_name[64] = "DFS1";
 
 typedef struct msg_s {
@@ -36,6 +39,12 @@ typedef struct msg_s {
     char filename[64];
     char directory[64];
 } msg_t;
+
+typedef struct rsp_s {
+    uint32_t func;
+    uint32_t err;
+    char data[256];
+} rsp_t;
 
 void error(char *msg) {
     perror(msg);
@@ -56,10 +65,11 @@ void put(msg_t rec, int sock) {
     char path[256] = "";
     char ch[4] = "";
     char *temp;
-    char line[265];
+    char line[256];
     int user_flag = 0;
     FILE *f;
     FILE *config;
+    rsp_t rsp;
 
     /* Check username and password */
     config = fopen("dfs.conf", "r");
@@ -78,8 +88,16 @@ void put(msg_t rec, int sock) {
     }
     fclose(config);
     if (user_flag == 0) {
-        // TODO send message back to client
         printf("Username and password not matched\n");
+        printf("Username: %s\n", rec.username);
+        printf("Password: %s\n", rec.password);
+        
+        /* Build response and send */
+        rsp.func = PUT;
+        rsp.err = CREDENTIALS;
+        strcpy(rsp.data, "Invalid username/password. Please try again.");
+        send(sock, &rsp, sizeof(rsp), 0);
+        
         return;
     }
 
@@ -121,10 +139,12 @@ void put(msg_t rec, int sock) {
     fclose(f);
 
     /* Get request data for second packet */
+    printf("Before pkt %d %d %d %s %s %s %s\n", rec.func, rec.chunk, rec.dlen, rec.username, rec.password, rec.filename, rec.directory);
     num = read(sock, &rec, sizeof(rec));
     if (num != sizeof(rec)) {
         error("read");
     }
+    printf("After pkt %d %d %d %s %s %s %s\n", rec.func, rec.chunk, rec.dlen, rec.username, rec.password, rec.filename, rec.directory);
 
     /* Check username and password */
     config = fopen("dfs.conf", "r");
@@ -143,8 +163,16 @@ void put(msg_t rec, int sock) {
     }
     fclose(config);
     if (user_flag == 0) {
-        // TODO send message back to client
         printf("Username and password not matched\n");
+        printf("Username: %s\n", rec.username);
+        printf("Password: %s\n", rec.password);
+     
+        /* Build response and send */
+        rsp.func = PUT;
+        rsp.err = CREDENTIALS;
+        strcpy(rsp.data, "Invalid username/password. Please try again.");
+        send(sock, &rsp, sizeof(rsp), 0);
+
         return;
     }
 
@@ -184,6 +212,14 @@ void put(msg_t rec, int sock) {
    
     /* Free memory */
     free(rbuf);
+
+    /* Send response */
+    rsp.func = PUT;
+    rsp.err = SUCCESS;
+    strcpy(rsp.data, "Successfully saved files to ");
+    strcat(rsp.data, server_name);
+    send(sock, &rsp, sizeof(rsp), 0);
+
 }
 
 void list(msg_t rec) {

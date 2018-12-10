@@ -25,6 +25,9 @@
 #define PUT   2
 #define MKDIR 3
 
+#define SUCCESS     0
+#define CREDENTIALS 255
+
 int dfs_sock[4];
 struct sockaddr_in dfs_addr[4];
 char username[64];
@@ -39,6 +42,12 @@ typedef struct msg_s {
     char filename[64];
     char directory[64];
 } msg_t;
+
+typedef struct rsp_s {
+    uint32_t func;
+    uint32_t err;
+    char data[256];
+} rsp_t;
 
 void error(char *msg) {
     perror(msg);
@@ -68,6 +77,7 @@ void put(char *filename) {
     msg_t pkt;
     int len = 0;
     char *rbuf;
+    rsp_t rsp;
     
     /* Open file */
     if (f == NULL) {
@@ -103,10 +113,15 @@ void put(char *filename) {
     /* Create file buffer */
     rbuf = (char *) malloc(len);
 
+    /* TODO get rid of this */
+    //dfs_sock[1] = 0;
+    //dfs_sock[2] = 0;
+    //dfs_sock[3] = 0;
+
     /* Start on index associated with modulo */
     for (int i = 0; i < 4; i++) {
         
-        printf("Sending to server %d\n", md5_mod);
+        printf("Sending to DFS%d\n", md5_mod + 1);
 
         /* Read chunk */
         fseek(f, len * i, SEEK_SET);
@@ -128,7 +143,7 @@ void put(char *filename) {
         }
 
         /* Send first data chunk */
-        ret = send(dfs_sock[md5_mod], rbuf, len, 0);
+        ret = send(dfs_sock[md5_mod], rbuf, num, 0);
 
         /* Read chunk */
         fseek(f, len * ((i + 1) % 4), SEEK_SET);
@@ -145,13 +160,27 @@ void put(char *filename) {
         }
 
         /* Send second data chunk */
-        ret = send(dfs_sock[md5_mod], rbuf, len, 0);
+        // TODO get rid of this
+        //if (md5_mod == 0) {
+        ret = send(dfs_sock[md5_mod], rbuf, num, 0);
 
+        /* Get response from servers */
+        num = read(dfs_sock[md5_mod], &rsp, sizeof(rsp));
+        if (num < 0) {
+            printf("Could not save data chunks %d and %d to DFS%d\n", i, (i + 1) % 4, md5_mod +  1);
+        } else if (rsp.func == PUT && rsp.err == CREDENTIALS) {
+            printf("DFS%d: %s\n", md5_mod + 1, rsp.data);
+        } else if (rsp.func == PUT && rsp.err == SUCCESS) {
+            printf("DFS%d: %s\n", md5_mod + 1, rsp.data);
+        } else {
+            printf("Invalid message from server\n");    
+        }
+        //}
+        
         /* Go to next server index */
         md5_mod = (md5_mod + 1) % 4;
-    }
 
-    /* TODO Get response from servers */
+    }
 
     /* Free memory */
     free(rbuf);
@@ -219,11 +248,19 @@ int main(int argc, char *argv[]) {
     }
 
     /* Create sockets */
-    for (int i = 0; i < 1; i++ ){
+    struct timeval tv;
+    for (int i = 0; i < 4; i++ ){
         printf("Creating socket %d\n", i);
         dfs_sock[i] = socket(AF_INET, SOCK_STREAM, 0);
         if (dfs_sock < 0) {
             error("Error inializing socket");
+        }
+
+        /* Set socket recieve timeout (2000ms) */
+        tv.tv_sec = 2;
+        tv.tv_usec = 0;
+        if (setsockopt(dfs_sock[i], SOL_SOCKET, SO_RCVTIMEO, &tv, sizeof(tv)) < 0) {
+            error("Error setting socket timeout");
         }
 
         /* Build server address */
@@ -235,15 +272,9 @@ int main(int argc, char *argv[]) {
         }
 
         if (connect(dfs_sock[i], (struct sockaddr *) &dfs_addr[i], sizeof(dfs_addr[i])) < 0) {
-            error("Connection failed");
+            //error("Connection failed");
+            printf("Connection failed\n");
         }
-
-        //printf("Sending to socket %d\n", i);
-        //serv_len = sizeof(dfs_addr[i]);
-        //ret = send(dfs_sock[i], "hello world", 11, 0);
-        //if (ret < 0) {
-        //    printf("Packet failed\n");
-        //}
     }
 
     /* Command loop */
