@@ -59,7 +59,8 @@ void warn(char *msg) {
     perror(msg);
 }
 
-void get(msg_t rec) {
+void get(msg_t rec, int sock) {
+    printf("Got a packet\n");
 
 }
 
@@ -299,6 +300,7 @@ void list(msg_t rec, int sock) {
         strcat(rsp.data, dir->d_name);
         send(sock, &rsp, sizeof(rsp), 0); 
     }
+    printf("Scanned all files\n");
     closedir(d);
 
 }
@@ -322,14 +324,14 @@ void process(int sock) {
     /* Get request data */
     num = read(sock, &rec, sizeof(rec));
     if (num != sizeof(rec)) {
-        error("read");
+        return;
     }
 
     /* Put request */
     if (rec.func == PUT) {
         put(rec, sock);
     } else if (rec.func == GET) {
-        get(rec);
+        get(rec, sock);
     } else if (rec.func == LIST) {
         list(rec, sock);
     } else if (rec.func == MKDIR) {
@@ -432,7 +434,7 @@ int main(int argc, char *argv[]) {
 
         /* Call to fork returns 0 in child thread and thread ID in parent thread */
         if (thread == 0) {
-            printf("Running worker process\n");
+            //printf("Running worker process\n");
 
             /* Only need client socket from accept */
             close(sock);

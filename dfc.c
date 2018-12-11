@@ -32,6 +32,10 @@
 
 int dfs_sock[4];
 struct sockaddr_in dfs_addr[4];
+char dfs[4][64];
+char dfs_host[4][32];
+char dfs_port[4][8];
+
 char username[64];
 char password[64];
 
@@ -61,6 +65,9 @@ typedef struct clist_s {
     uint8_t c2;
     uint8_t c3;
 } clist_t;
+
+void create_socks();
+void close_socks();
 
 void error(char *msg) {
     perror(msg);
@@ -107,7 +114,7 @@ void get(char *filename) {
             printf("Packet failed\n");
         }
 
-        usleep(1000);
+        //usleep(1000);
 
         /* Get response from servers */
         //for (int j = 0; j < 2; j++) {
@@ -163,6 +170,42 @@ void get(char *filename) {
     if (temp != NULL) { 
         temp = strtok(temp, " ");
         printf("Found file in list, %s\n", temp);
+        strcpy(temp_file, temp);
+        temp = strtok(NULL, " ");
+        printf("Code %s\n", temp);
+        strcpy(temp_code, temp);
+        if (strstr(temp_code, "Z") == NULL) {
+            printf("Found complete file across four servers\n");
+            for (int i = 0; i < 4; i++) {
+                printf("Making request for chunk %d to DFS%d\n", i, (temp_code[i]-48) +  1);
+                //printf("Making request for chunk %d to DFS%d\n", i, 1);
+
+                /* Reopen sockets */
+                close_socks();
+                create_socks();
+            
+                /* Build packet */
+                pkt.func  = GET;
+                pkt.chunk = i;
+                pkt.dlen = 0;
+                strcpy(pkt.username, username);
+                strcpy(pkt.password, password);
+                strcpy(pkt.filename, filename);
+                strcpy(pkt.directory, "/");
+
+                /* Send packet */
+                ret = send(dfs_sock[temp_code[i]-48], &pkt, sizeof(pkt), 0);
+                if (ret < 0) {
+                    printf("Packet failed\n");
+                }
+            }
+        } else {
+            printf("Not a sufficient amount of file chunks\n");
+            return;
+        }
+    } else {
+        printf("Could not find file on server\n");
+        return;
     }
 
 }
@@ -283,10 +326,48 @@ void makedir(char *dirname) {
 
 }
 
+void create_socks() {
+    /* Create sockets */
+    struct timeval tv;
+    for (int i = 0; i < 4; i++ ){
+        //printf("Creating socket %d\n", i);
+        dfs_sock[i] = socket(AF_INET, SOCK_STREAM, 0);
+        if (dfs_sock < 0) {
+            error("Error inializing socket");
+        }
+
+        /* Set socket recieve timeout (200ms) */
+        tv.tv_sec = 0;
+        tv.tv_usec = 200000;
+        if (setsockopt(dfs_sock[i], SOL_SOCKET, SO_RCVTIMEO, &tv, sizeof(tv)) < 0) {
+            error("Error setting socket timeout");
+        }
+
+        /* Build server address */
+        bzero((char *) &dfs_addr[i], sizeof(dfs_addr[i]));
+        dfs_addr[i].sin_family = AF_INET;
+        dfs_addr[i].sin_port = htons(atoi(dfs_port[i]));
+        if (inet_pton(AF_INET, dfs_host[i], &dfs_addr[i].sin_addr) <= 0) {
+            error("Invalid host address for server");
+        }
+
+        if (connect(dfs_sock[i], (struct sockaddr *) &dfs_addr[i], sizeof(dfs_addr[i])) < 0) {
+            //error("Connection failed");
+            printf("Connection failed\n");
+        }
+    }
+}
+
+void close_socks() {
+    for (int i = 0; i < 4; i++) {
+        close(dfs_sock[i]);
+    }
+}
+
 int main(int argc, char *argv[]) {
-    char dfs[4][64];
-    char dfs_host[4][32];
-    char dfs_port[4][8];
+    //char dfs[4][64];
+    //char dfs_host[4][32];
+    //char dfs_port[4][8];
 
     char *temp;
     char line[256];
@@ -341,13 +422,14 @@ int main(int argc, char *argv[]) {
     }
 
     /* Create sockets */
+#if 0
     struct timeval tv;
     for (int i = 0; i < 4; i++ ){
         printf("Creating socket %d\n", i);
         dfs_sock[i] = socket(AF_INET, SOCK_STREAM, 0);
         if (dfs_sock < 0) {
             error("Error inializing socket");
-        }
+        } 
 
         /* Set socket recieve timeout (200ms) */
         tv.tv_sec = 0;
@@ -369,6 +451,7 @@ int main(int argc, char *argv[]) {
             printf("Connection failed\n");
         }
     }
+#endif
 
     /* Command loop */
     while(1) {
@@ -386,7 +469,9 @@ int main(int argc, char *argv[]) {
         /* Select operation */
         if (strcmp("list", user_oper) == 0) {
             printf("Sending list command\n");
+            create_socks();
             list();
+            close_socks();
         } else if(strcmp ("get", user_oper) == 0) {
             user_arg = strtok(NULL, " \n\t\r");
             if (user_arg == NULL) {
@@ -394,7 +479,9 @@ int main(int argc, char *argv[]) {
                 continue;
             }
             printf("Sending get command\n");
+            create_socks();
             get(user_arg);
+            close_socks();
         } else if(strcmp ("put", user_oper) == 0) {
             user_arg = strtok(NULL, " \n\t\r");
             if (user_arg == NULL) {
@@ -402,7 +489,9 @@ int main(int argc, char *argv[]) {
                 continue;
             }
             printf("Sending put command\n");
+            create_socks();
             put(user_arg);
+            close_socks();
          } else if(strcmp ("mkdir", user_oper) == 0) {
             user_arg = strtok(NULL, " \n\t\r");
             if (user_arg == NULL) {
@@ -410,7 +499,9 @@ int main(int argc, char *argv[]) {
                 continue;
             }
             printf("Sending mkdir command\n");
+            create_socks();
             makedir(user_arg);
+            close_socks();
         } else {
             printf("Invalid option. Options are:\n\tlist\n\tget\n\tput\n\tmkdir\n");
             continue;
