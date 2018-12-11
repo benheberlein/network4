@@ -19,6 +19,7 @@
 #include <netinet/in.h>
 #include <arpa/inet.h>
 #include <sys/stat.h>
+#include <dirent.h>
 
 #define LIST  0
 #define GET   1
@@ -43,6 +44,9 @@ typedef struct msg_s {
 typedef struct rsp_s {
     uint32_t func;
     uint32_t err;
+    //uint32_t chunk;
+    //uint32_t filename;
+    //uint32_t directory;
     char data[256];
 } rsp_t;
 
@@ -222,7 +226,80 @@ void put(msg_t rec, int sock) {
 
 }
 
-void list(msg_t rec) {
+void list(msg_t rec, int sock) {
+    char path[256];
+    char temp_path[256];
+    char line[256];
+    char *temp;
+    char ch[4];
+    FILE *config;
+    FILE *f;
+    rsp_t rsp;
+    int user_flag = 0;
+
+    /* Check username and password */
+    config = fopen("dfs.conf", "r");
+    user_flag = 0;
+    while(fgets(line, sizeof(line), config)) {
+        temp = strtok(line, " \r\n");
+        if (strcmp(temp, rec.username) == 0) {
+            printf("Found matching username\n");
+            temp = strtok(NULL, " \r\n");
+            if (strcmp(temp, rec.password) == 0) {
+                printf("Found matching password\n");
+                user_flag = 1;
+                break;
+            }
+        }
+    }
+    fclose(config);
+    if (user_flag == 0) {
+        printf("Username and password not matched\n");
+        printf("Username: %s\n", rec.username);
+        printf("Password: %s\n", rec.password);
+
+        /* Build response and send */
+        rsp.func = LIST;
+        rsp.err = CREDENTIALS;
+        strcpy(rsp.data, "Invalid username/password. Please try again.");
+        send(sock, &rsp, sizeof(rsp), 0);
+
+        return;
+    }
+
+    /* Construct path */
+    strcpy(path, server_name);
+    mkdir(path, S_IRWXU | S_IRWXG | S_IROTH | S_IXOTH);
+    strcat(path, rec.username);
+    //strcat(path, rec.directory);
+    //strcat(path, ".");
+    //strcat(path, rec.filename);
+    //strcat(path, ".");
+    printf("Looking for files at %s/*\n", path);
+
+    /* Get all files */
+    DIR *d;
+    struct dirent *dir;
+    d = opendir(path);
+    if (d == NULL) {
+        printf("Server has no files\n");
+        return;
+    }
+    while((dir = readdir(d)) != NULL) {
+        printf("%s\n", dir->d_name);
+        if (strcmp(dir->d_name, ".") == 0 ||
+            strcmp(dir->d_name, "..") == 0) {
+            continue;
+        }
+        rsp.func = LIST;
+        rsp.err = SUCCESS;
+        strcpy(rsp.data, "");
+        strcat(rsp.data, path);
+        strcat(rsp.data, "/");
+        strcat(rsp.data, dir->d_name);
+        send(sock, &rsp, sizeof(rsp), 0); 
+    }
+    closedir(d);
 
 }
 
@@ -254,7 +331,7 @@ void process(int sock) {
     } else if (rec.func == GET) {
         get(rec);
     } else if (rec.func == LIST) {
-        list(rec);
+        list(rec, sock);
     } else if (rec.func == MKDIR) {
         makedir(rec);
     } else {

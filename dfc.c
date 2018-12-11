@@ -28,6 +28,8 @@
 #define SUCCESS     0
 #define CREDENTIALS 255
 
+#define MAX_FILES 100
+
 int dfs_sock[4];
 struct sockaddr_in dfs_addr[4];
 char username[64];
@@ -46,8 +48,19 @@ typedef struct msg_s {
 typedef struct rsp_s {
     uint32_t func;
     uint32_t err;
+    //uint32_t chunk;
+    //uint32_t filename;
+    //uint32_t directory;
     char data[256];
 } rsp_t;
+
+typedef struct clist_s {
+    char name[64];
+    uint8_t c0;
+    uint8_t c1;
+    uint8_t c2;
+    uint8_t c3;
+} clist_t;
 
 void error(char *msg) {
     perror(msg);
@@ -63,6 +76,94 @@ void list() {
 }
 
 void get(char *filename) {
+    int num = 0;
+    int ret = 0;
+    char file_list[4096] = "";
+    char temp_file[256];
+    char temp_code[8];
+    char *temp;
+    msg_t pkt;
+    rsp_t rsp;
+    clist_t clist[MAX_FILES];
+    int curr_chunk = 0;
+    int len = 0;
+    int index = 0;
+
+    /* List first to see what files server has */
+    pkt.func = LIST;
+    pkt.chunk = 0;
+    pkt.dlen = 0;
+    strcpy(pkt.username, username);
+    strcpy(pkt.password, password);
+    strcpy(pkt.filename, filename);
+    strcpy(pkt.directory, "/");
+
+    /* Send to all servers */
+    for (int i = 0; i < 4; i++) {
+
+        /* Send packet */
+        ret = send(dfs_sock[i], &pkt, sizeof(pkt), 0);
+        if (ret < 0) {
+            printf("Packet failed\n");
+        }
+
+        usleep(1000);
+
+        /* Get response from servers */
+        //for (int j = 0; j < 2; j++) {
+        while(1) {
+            num = read(dfs_sock[i], &rsp, sizeof(rsp));
+            if (num < 0) {
+                printf("Timed out waiting for server DFS%d\n", i +  1);
+                break;
+            } else if (rsp.func == LIST && rsp.err == CREDENTIALS) {
+                printf("DFS%d: %s\n", i + 1, rsp.data);
+            } else if (rsp.func == LIST && rsp.err == SUCCESS) {
+                printf("DFS%d: %s\n", i + 1, rsp.data);
+
+                /* Parse file name and get chunk index */
+                temp = strtok(rsp.data, "/");
+                temp = strtok(NULL, "/");
+                temp = strtok(NULL, "/");
+                if (temp == NULL) {
+                    break;
+                }
+
+                /* Get index */
+                len = strlen(temp);
+                index = (int) temp[len-1] - 48;
+
+                /* Save only filename */
+                len = strlen(temp);
+                temp[len-2] = '\0';
+                strcpy(temp_file, temp+1);
+
+                /* Insert into list of files */
+                len = strlen(temp);
+                temp = strstr(file_list, temp_file);
+                if (temp != NULL) {
+                    *(temp+len+index) = (char) (i + 48); 
+                    printf("%s\n", file_list);
+                } else {
+                    strcat(file_list, temp_file);
+                    strcat(file_list, " ZZZZ ");
+                    temp = strstr(file_list, temp_file);
+                    *(temp+len+index) = (char) (i + 48); 
+                    printf("%s\n", file_list);
+                }
+                
+            } else {
+                printf("Invalid message from server\n");    
+            }
+        }
+    }
+
+    /* See if file is in list */
+    temp = strstr(file_list, filename);
+    if (temp != NULL) { 
+        temp = strtok(temp, " ");
+        printf("Found file in list, %s\n", temp);
+    }
 
 }
 
@@ -113,11 +214,6 @@ void put(char *filename) {
     /* Create file buffer */
     rbuf = (char *) malloc(len);
 
-    /* TODO get rid of this */
-    //dfs_sock[1] = 0;
-    //dfs_sock[2] = 0;
-    //dfs_sock[3] = 0;
-
     /* Start on index associated with modulo */
     for (int i = 0; i < 4; i++) {
         
@@ -160,8 +256,6 @@ void put(char *filename) {
         }
 
         /* Send second data chunk */
-        // TODO get rid of this
-        //if (md5_mod == 0) {
         ret = send(dfs_sock[md5_mod], rbuf, num, 0);
 
         /* Get response from servers */
@@ -175,7 +269,6 @@ void put(char *filename) {
         } else {
             printf("Invalid message from server\n");    
         }
-        //}
         
         /* Go to next server index */
         md5_mod = (md5_mod + 1) % 4;
@@ -256,9 +349,9 @@ int main(int argc, char *argv[]) {
             error("Error inializing socket");
         }
 
-        /* Set socket recieve timeout (2000ms) */
-        tv.tv_sec = 2;
-        tv.tv_usec = 0;
+        /* Set socket recieve timeout (200ms) */
+        tv.tv_sec = 0;
+        tv.tv_usec = 200000;
         if (setsockopt(dfs_sock[i], SOL_SOCKET, SO_RCVTIMEO, &tv, sizeof(tv)) < 0) {
             error("Error setting socket timeout");
         }
