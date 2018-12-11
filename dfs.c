@@ -44,6 +44,7 @@ typedef struct msg_s {
 typedef struct rsp_s {
     uint32_t func;
     uint32_t err;
+    uint32_t dlen;
     //uint32_t chunk;
     //uint32_t filename;
     //uint32_t directory;
@@ -60,7 +61,101 @@ void warn(char *msg) {
 }
 
 void get(msg_t rec, int sock) {
+    int num = 0;
+    char *rbuf;
+    char path[256] = "";
+    char ch[4] = "";
+    char *temp;
+    char line[256];
+    int user_flag = 0;
+    FILE *f;
+    FILE *config;
+    rsp_t rsp;
+    int len = 0;
+
     printf("Got a packet\n");
+
+    /* Check username and password */
+    config = fopen("dfs.conf", "r");
+    user_flag = 0;
+    while(fgets(line, sizeof(line), config)) {
+        temp = strtok(line, " \r\n");
+        if (strcmp(temp, rec.username) == 0) {
+            printf("Found matching username\n");
+            temp = strtok(NULL, " \r\n");
+            if (strcmp(temp, rec.password) == 0) {
+                printf("Found matching password\n");
+                user_flag = 1;
+                break;
+            }
+        }
+    }
+    fclose(config);
+    if (user_flag == 0) {
+        printf("Username and password not matched\n");
+        printf("Username: %s\n", rec.username);
+        printf("Password: %s\n", rec.password);
+
+        /* Build response and send */
+        rsp.func = GET;
+        rsp.err = CREDENTIALS;
+        strcpy(rsp.data, "Invalid username/password. Please try again.");
+        send(sock, &rsp, sizeof(rsp), 0);
+
+        return;
+    }
+
+    /* Construct path */
+    strcpy(path, server_name);
+    mkdir(path, S_IRWXU | S_IRWXG | S_IROTH | S_IXOTH);
+    strcat(path, rec.username);
+    strcat(path, rec.directory);
+    //printf("Creating dir at %s\n", path);
+    mkdir(path, S_IRWXU | S_IRWXG | S_IROTH | S_IXOTH);
+    strcat(path, ".");
+    strcat(path, rec.filename);
+    strcat(path, ".");
+    sprintf(ch, "%d", rec.chunk);
+    strcat(path, ch);
+
+    /* Open file */
+    f = fopen(path, "r");
+    if (f == NULL) {
+        printf("Couldn't open file");
+        return;
+    }
+
+    /* Get file len */
+    fseek(f, 0L, SEEK_END);
+    len = ftell(f);
+    fseek(f, 0L, SEEK_SET);
+
+    /* Open buffer for chunk */
+    rbuf = (char *) malloc(len + 32);
+
+    /* Get read data and save */
+    num = fread(rbuf, 1, len, f);
+    printf("Data size: %d %d\n", num, len);
+    if (num != len) {
+        printf("Could not read file data\n");
+    }
+
+    /* Send response packet */
+    rsp.func = GET;
+    rsp.err = SUCCESS;
+    rsp.dlen = len;
+    strcpy(rsp.data, "Successfully read file chunk\n");
+    send(sock, &rsp, sizeof(rsp), 0);
+
+    /* Send data */
+    send(sock, rbuf, len, 0);
+    printf("Sent data chunk\n");
+
+    /* Close file */
+    fclose(f);
+
+    /* Free memory */
+    free(rbuf); 
 
 }
 
@@ -114,7 +209,7 @@ void put(msg_t rec, int sock) {
     mkdir(path, S_IRWXU | S_IRWXG | S_IROTH | S_IXOTH);
     strcat(path, rec.username);
     strcat(path, rec.directory);
-    printf("Creating dir at %s\n", path);
+    //printf("Creating dir at %s\n", path);
     mkdir(path, S_IRWXU | S_IRWXG | S_IROTH | S_IXOTH);
     strcat(path, ".");
     strcat(path, rec.filename);

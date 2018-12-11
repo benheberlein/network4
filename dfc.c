@@ -52,6 +52,7 @@ typedef struct msg_s {
 typedef struct rsp_s {
     uint32_t func;
     uint32_t err;
+    uint32_t dlen;
     //uint32_t chunk;
     //uint32_t filename;
     //uint32_t directory;
@@ -95,6 +96,8 @@ void get(char *filename) {
     int curr_chunk = 0;
     int len = 0;
     int index = 0;
+    char *rbuf;
+    FILE *f;
 
     /* List first to see what files server has */
     pkt.func = LIST;
@@ -176,9 +179,17 @@ void get(char *filename) {
         strcpy(temp_code, temp);
         if (strstr(temp_code, "Z") == NULL) {
             printf("Found complete file across four servers\n");
+            
+            /* Open file */
+            f = fopen("rec.txt", "w");
+            if (f == NULL) {
+                printf("Could not open file on client\n");
+                return;
+            }
+
+            /* Make request for each chunk */
             for (int i = 0; i < 4; i++) {
-                printf("Making request for chunk %d to DFS%d\n", i, (temp_code[i]-48) +  1);
-                //printf("Making request for chunk %d to DFS%d\n", i, 1);
+                printf("Making request for chunk %d to DFS%d\n", i, (temp_code[i]-48) + 1);
 
                 /* Reopen sockets */
                 close_socks();
@@ -198,7 +209,39 @@ void get(char *filename) {
                 if (ret < 0) {
                     printf("Packet failed\n");
                 }
+
+                /* Wait for response */
+                num = read(dfs_sock[temp_code[i]-48], &rsp, sizeof(rsp));
+                if (num < 0) {
+                    printf("Could not read chunk %d from DFS%d\n", i, (temp_code[i]-48) + 1);
+                    continue;
+                } else if (rsp.func == GET && rsp.err == CREDENTIALS) {
+                    printf("DFS%d: %s\n", (temp_code[i]-48) + 1, rsp.data);
+                    continue;
+                } else if (rsp.func == GET && rsp.err == SUCCESS) {
+                    printf("DFS%d: %s\n", (temp_code[i]-48) + 1, rsp.data);
+                } else {
+                    printf("Invalid message from server\n");
+                    continue;
+                }
+
+                /* Wait for data */
+                rbuf = (char *) malloc(rsp.dlen+32); 
+                num = read(dfs_sock[temp_code[i]-48], rbuf, rsp.dlen);
+                printf("%s", rbuf);
+                printf("\n");
+                                
+                /* Save to file */
+                fwrite(rbuf, 1, rsp.dlen, f);
+
+                /* Free memory */
+                free(rbuf);
             }
+
+            /* Close file */
+            fclose(f);
+            printf("Successfully wrote %s\n", filename);
+
         } else {
             printf("Not a sufficient amount of file chunks\n");
             return;
