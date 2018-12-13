@@ -80,7 +80,101 @@ void warn(char *msg) {
 }
 
 void list() {
+    int num = 0;
+    int ret = 0;
+    char file_list[4096] = "";
+    char temp_file[256];
+    char temp_code[8];
+    char *temp;
+    msg_t pkt;
+    rsp_t rsp;
+    clist_t clist[MAX_FILES];
+    int curr_chunk = 0;
+    int len = 0;
+    int index = 0;
+    char *rbuf;
+    FILE *f;
 
+    /* List first to see what files server has */
+    pkt.func = LIST;
+    pkt.chunk = 0;
+    pkt.dlen = 0;
+    strcpy(pkt.username, username);
+    strcpy(pkt.password, password);
+    strcpy(pkt.filename, "");
+    strcpy(pkt.directory, "/");
+
+    /* Send to all servers */
+    for (int i = 0; i < 4; i++) {
+
+        /* Send packet */
+        ret = send(dfs_sock[i], &pkt, sizeof(pkt), 0);
+        if (ret < 0) {
+            printf("Packet failed\n");
+        }
+
+        /* Get response from servers */
+        //for (int j = 0; j < 2; j++) {
+        while(1) {
+            num = read(dfs_sock[i], &rsp, sizeof(rsp));
+            if (num < 0) {
+                printf("Timed out waiting for server DFS%d\n", i +  1);
+                break;
+            } else if (rsp.func == LIST && rsp.err == CREDENTIALS) {
+                printf("DFS%d: %s\n", i + 1, rsp.data);
+            } else if (rsp.func == LIST && rsp.err == SUCCESS) {
+                //printf("DFS%d: %s\n", i + 1, rsp.data);
+
+                /* Parse file name and get chunk index */
+                temp = strtok(rsp.data, "/");
+                temp = strtok(NULL, "/");
+                temp = strtok(NULL, "/");
+                if (temp == NULL) {
+                    break;
+                }
+
+                /* Get index */
+                len = strlen(temp);
+                index = (int) temp[len-1] - 48;
+
+                /* Save only filename */
+                len = strlen(temp);
+                temp[len-2] = '\0';
+                strcpy(temp_file, temp+1);
+
+                /* Insert into list of files */
+                len = strlen(temp);
+                temp = strstr(file_list, temp_file);
+                if (temp != NULL) {
+                    *(temp+len+index) = (char) (i + 48); 
+                    //printf("%s\n", file_list);
+                } else {
+                    strcat(file_list, temp_file);
+                    strcat(file_list, " ZZZZ ");
+                    temp = strstr(file_list, temp_file);
+                    *(temp+len+index) = (char) (i + 48); 
+                    //printf("%s\n", file_list);
+                }
+                
+            } else {
+                printf("Invalid message from server\n");    
+            }
+        }
+    }
+
+    /* Go through all files in list and print */
+    temp = strtok(file_list, " ");
+    printf("Files on DFS:\n");
+    while(temp != NULL) {
+        printf("%s", temp);
+        temp = strtok(NULL, " ");
+        if (strstr(temp, "Z")) {
+            printf(" [incomplete]");
+        }
+        printf("\n");
+        temp = strtok(NULL, " ");
+    }
+ 
 }
 
 void get(char *filename) {
@@ -129,7 +223,7 @@ void get(char *filename) {
             } else if (rsp.func == LIST && rsp.err == CREDENTIALS) {
                 printf("DFS%d: %s\n", i + 1, rsp.data);
             } else if (rsp.func == LIST && rsp.err == SUCCESS) {
-                printf("DFS%d: %s\n", i + 1, rsp.data);
+                //printf("DFS%d: %s\n", i + 1, rsp.data);
 
                 /* Parse file name and get chunk index */
                 temp = strtok(rsp.data, "/");
@@ -153,13 +247,13 @@ void get(char *filename) {
                 temp = strstr(file_list, temp_file);
                 if (temp != NULL) {
                     *(temp+len+index) = (char) (i + 48); 
-                    printf("%s\n", file_list);
+                    //printf("%s\n", file_list);
                 } else {
                     strcat(file_list, temp_file);
                     strcat(file_list, " ZZZZ ");
                     temp = strstr(file_list, temp_file);
                     *(temp+len+index) = (char) (i + 48); 
-                    printf("%s\n", file_list);
+                    //printf("%s\n", file_list);
                 }
                 
             } else {
@@ -181,7 +275,7 @@ void get(char *filename) {
             printf("Found complete file across four servers\n");
             
             /* Open file */
-            f = fopen("rec.txt", "w");
+            f = fopen(filename, "w");
             if (f == NULL) {
                 printf("Could not open file on client\n");
                 return;
@@ -228,8 +322,9 @@ void get(char *filename) {
                 /* Wait for data */
                 rbuf = (char *) malloc(rsp.dlen+32); 
                 num = read(dfs_sock[temp_code[i]-48], rbuf, rsp.dlen);
-                printf("%s", rbuf);
-                printf("\n");
+                printf("Received chunk %d\n", i);
+                //printf("%s", rbuf);
+                //printf("\n");
                                 
                 /* Save to file */
                 fwrite(rbuf, 1, rsp.dlen, f);
@@ -243,7 +338,7 @@ void get(char *filename) {
             printf("Successfully wrote %s\n", filename);
 
         } else {
-            printf("Not a sufficient amount of file chunks\n");
+            printf("File is incomplete. Missing file chunks\n");
             return;
         }
     } else {
