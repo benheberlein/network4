@@ -31,6 +31,7 @@
 #define MAX_FILES 100
 
 int dfs_sock[4];
+int dfs_err[4];
 struct sockaddr_in dfs_addr[4];
 char dfs[4][64];
 char dfs_host[4][32];
@@ -95,7 +96,7 @@ void list() {
     char *rbuf;
     FILE *f;
 
-    /* List first to see what files server has */
+    /* Send list command */
     pkt.func = LIST;
     pkt.chunk = 0;
     pkt.dlen = 0;
@@ -106,6 +107,11 @@ void list() {
 
     /* Send to all servers */
     for (int i = 0; i < 4; i++) {
+
+        /* Skip for closed socket */
+        if (dfs_err[i] == 1) {
+            continue;
+        }
 
         /* Send packet */
         ret = send(dfs_sock[i], &pkt, sizeof(pkt), 0);
@@ -204,6 +210,11 @@ void get(char *filename) {
 
     /* Send to all servers */
     for (int i = 0; i < 4; i++) {
+
+        /* Skip for closed socket */
+        if (dfs_err[i] == 1) {
+            continue;
+        }
 
         /* Send packet */
         ret = send(dfs_sock[i], &pkt, sizeof(pkt), 0);
@@ -397,7 +408,12 @@ void put(char *filename) {
 
     /* Start on index associated with modulo */
     for (int i = 0; i < 4; i++) {
-        
+      
+        /* Skip for closed socket */
+        if (dfs_err[md5_mod] == 1) {
+            continue;
+        }
+
         printf("Sending to DFS%d\n", md5_mod + 1);
 
         /* Read chunk */
@@ -469,6 +485,7 @@ void create_socks() {
     struct timeval tv;
     for (int i = 0; i < 4; i++ ){
         //printf("Creating socket %d\n", i);
+        dfs_err[i] = 0;
         dfs_sock[i] = socket(AF_INET, SOCK_STREAM, 0);
         if (dfs_sock < 0) {
             error("Error inializing socket");
@@ -492,6 +509,7 @@ void create_socks() {
         if (connect(dfs_sock[i], (struct sockaddr *) &dfs_addr[i], sizeof(dfs_addr[i])) < 0) {
             //error("Connection failed");
             printf("Connection failed\n");
+            dfs_err[i] = 1;
         }
     }
 }
@@ -559,37 +577,6 @@ int main(int argc, char *argv[]) {
         }
     }
 
-    /* Create sockets */
-#if 0
-    struct timeval tv;
-    for (int i = 0; i < 4; i++ ){
-        printf("Creating socket %d\n", i);
-        dfs_sock[i] = socket(AF_INET, SOCK_STREAM, 0);
-        if (dfs_sock < 0) {
-            error("Error inializing socket");
-        } 
-
-        /* Set socket recieve timeout (200ms) */
-        tv.tv_sec = 0;
-        tv.tv_usec = 200000;
-        if (setsockopt(dfs_sock[i], SOL_SOCKET, SO_RCVTIMEO, &tv, sizeof(tv)) < 0) {
-            error("Error setting socket timeout");
-        }
-
-        /* Build server address */
-        bzero((char *) &dfs_addr[i], sizeof(dfs_addr[i]));
-        dfs_addr[i].sin_family = AF_INET;
-        dfs_addr[i].sin_port = htons(atoi(dfs_port[i]));
-        if (inet_pton(AF_INET, dfs_host[i], &dfs_addr[i].sin_addr) <= 0) {
-            error("Invalid host address for server");
-        }
-
-        if (connect(dfs_sock[i], (struct sockaddr *) &dfs_addr[i], sizeof(dfs_addr[i])) < 0) {
-            //error("Connection failed");
-            printf("Connection failed\n");
-        }
-    }
-#endif
 
     /* Command loop */
     while(1) {
