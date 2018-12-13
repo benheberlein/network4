@@ -80,6 +80,19 @@ void warn(char *msg) {
     perror(msg);
 }
 
+void crypt(char *dat, char *key, int len) {
+    /* Both encryption and decryption using XOR with key */
+    char *d;
+    int klen = 0;
+ 
+    d = dat;
+    klen = strlen(key);
+    for (int i = 0; i < len; i++) {
+        *d ^= key[i % klen];
+        d++;
+    }
+}
+
 void list() {
     int num = 0;
     int ret = 0;
@@ -186,7 +199,8 @@ void list() {
 void get(char *filename) {
     int num = 0;
     int ret = 0;
-    char file_list[4096] = "";
+    char file_list[4096] = " ";
+    char filename_mod[64] = "";
     char temp_file[256];
     char temp_code[8];
     char *temp;
@@ -274,7 +288,10 @@ void get(char *filename) {
     }
 
     /* See if file is in list */
-    temp = strstr(file_list, filename);
+    strcpy(filename_mod, " ");
+    strcat(filename_mod, filename);
+    strcat(filename_mod, " ");
+    temp = strstr(file_list, filename_mod);
     if (temp != NULL) { 
         temp = strtok(temp, " ");
         printf("Found file in list, %s\n", temp);
@@ -336,6 +353,10 @@ void get(char *filename) {
                 printf("Received chunk %d\n", i);
                 //printf("%s", rbuf);
                 //printf("\n");
+
+                /* Decrypt in place */
+                printf("Decrypting data\n");
+                crypt(rbuf, username, rsp.dlen);
                                 
                 /* Save to file */
                 fwrite(rbuf, 1, rsp.dlen, f);
@@ -420,6 +441,10 @@ void put(char *filename) {
         fseek(f, len * i, SEEK_SET);
         num = fread(rbuf, 1, len, f);
 
+        /* Encrypt in place */
+        printf("Encrypting data\n");
+        crypt(rbuf, username, num);
+
         /* Build first packet */
         pkt.func  = PUT;
         pkt.chunk = i;
@@ -441,6 +466,10 @@ void put(char *filename) {
         /* Read chunk */
         fseek(f, len * ((i + 1) % 4), SEEK_SET);
         num = fread(rbuf, 1, len, f);
+
+        /* Encrypt in place */
+        printf("Encrypting data\n");
+        crypt(rbuf, username, num);
 
         /* Build second packet */
         pkt.chunk = (i + 1) % 4;
