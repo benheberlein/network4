@@ -152,6 +152,11 @@ void list() {
                     break;
                 }
 
+                if (temp[0] != '.') {
+                    //printf("Directory: %s\n", temp);
+                    continue;
+                }
+
                 /* Get index */
                 len = strlen(temp);
                 index = (int) temp[len-1] - 48;
@@ -506,7 +511,58 @@ void put(char *filename) {
 }
 
 void makedir(char *dirname) {
+    int len = 0;
+    int ret = 0;
+    char temp[64];
+    int num = 0;
+    msg_t pkt;
+    rsp_t rsp;
 
+    len = strlen(dirname);
+    if (dirname[len-1] != '/') {
+        strcat(dirname, "/");
+    }
+    strcpy(temp,"/");
+    if (dirname[0] != '/') {
+        strcat(temp, dirname);
+    } else {
+        strcpy(temp, dirname);
+    }
+
+    /* Build first packet */
+    pkt.func  = MKDIR;
+    pkt.chunk = 0;
+    pkt.dlen = 0;
+    strcpy(pkt.username, username);
+    strcpy(pkt.password, password);
+    strcpy(pkt.filename, "");
+    strcpy(pkt.directory, temp);
+
+    /* Send packet to all servers */
+    for (int i = 0; i < 4; i++) {
+        /* Skip for closed socket */
+        if (dfs_err[i] == 1) {
+            continue;
+        }
+
+        ret = send(dfs_sock[i], &pkt, sizeof(pkt), 0);
+        if (ret < 0) {
+            printf("Packet failed\n");
+        }
+
+        /* Get response from servers */
+        num = read(dfs_sock[i], &rsp, sizeof(rsp));
+        if (num < 0) {
+            printf("Could not make folder on DFS%d\n", i + 1);
+        } else if (rsp.func == MKDIR && rsp.err == CREDENTIALS) {
+            printf("DFS%d: %s\n", i + 1, rsp.data);
+        } else if (rsp.func == MKDIR && rsp.err == SUCCESS) {
+            printf("DFS%d: %s\n", i + 1, rsp.data);
+        } else {
+            printf("Invalid message from server\n");
+        }
+
+    }
 }
 
 void create_socks() {

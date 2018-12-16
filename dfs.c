@@ -208,9 +208,24 @@ void put(msg_t rec, int sock) {
     strcpy(path, server_name);
     mkdir(path, S_IRWXU | S_IRWXG | S_IROTH | S_IXOTH);
     strcat(path, rec.username);
+    mkdir(path, S_IRWXU | S_IRWXG | S_IROTH | S_IXOTH);
     strcat(path, rec.directory);
     //printf("Creating dir at %s\n", path);
     mkdir(path, S_IRWXU | S_IRWXG | S_IROTH | S_IXOTH);
+    
+    /* Done if we are just making directory */
+    if (rec.func == MKDIR) {
+        free(rbuf);
+
+        /* Build response and send */
+        rsp.func = rec.func;
+        rsp.err = SUCCESS;
+        strcpy(rsp.data, "Made directory.");
+        send(sock, &rsp, sizeof(rsp), 0);
+
+        return;
+    }
+
     strcat(path, ".");
     strcat(path, rec.filename);
     strcat(path, ".");
@@ -430,7 +445,8 @@ void process(int sock) {
     } else if (rec.func == LIST) {
         list(rec, sock);
     } else if (rec.func == MKDIR) {
-        makedir(rec);
+        //makedir(rec);
+        put(rec, sock);
     } else {
         printf("Received invalid function\n");
         return;
